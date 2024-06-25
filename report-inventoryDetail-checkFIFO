@@ -1,0 +1,109 @@
+// A Report type script takes as input all data identified by Infoplus to build a report, accessible as:
+//    report.getOriginalRows()
+// 
+// The script is responsible for manipulating that data as needed, and putting it back into the report via:
+//    report.addRow()
+// 
+// A script of this type has the following variables available:
+// 
+// report - object with the following methods:
+//    .originalRows() - returns a list of objects representing the data of the report, with the following methods:
+//                       get - takes a report column label as input, and returns the value in that row & column
+//                       put - takes a report column label and a value as input, and puts that value in that column in the row.
+//    .addRow(rowObject) - adds a new row (which should come from originalRows or duplicateRow) to the end of the report.
+//    .duplicateRow(rowObject) - returns an object, which is a copy of the rowObject passed in as input.
+//                               Note that the row is not automatically added to the report - you must call addRow.
+//    .createNewRow() - returns an object, which is a new blank rowObject.
+//                               Note that the row is not automatically added to the report - you must call addRow.
+//    .addColumn(columnLabel) - adds a new column with the specified label to the end of the report.
+//    .removeColumn(columnLabel) - removes the column with the specified label from the report.
+// 
+// utils - object with the following methods:
+//    .log(message) - add a line to the Script Output's log.
+// 
+// infoplusApi - object which provides access to the Infoplus API, specifically, with the following methods:
+//    .search(type, filter, pageNo, limit, orderBy) - run a search query in the Infoplus API.
+//    .getById(type, id) - get the record of the specified type identified by the id.
+//    .getTags(type, id) - get the tags from Infoplus for the specified record.
+//    .constructModel(type) - used to construct an API model object of the given type.
+//        - See the https://developer.infopluscommerce.com/ for more details.
+// 
+// Example:
+
+/*
+
+
+Take the inventory details, Create map of objects, with Sku as key
+Filter out any LO skus
+Map[Sku] = [] : inventorydetails
+also create array with unique skus so we can check through them
+
+Then go through each sku and find min 9B inventory, compare to min 9C inventory, if B<C, add to report as where a swap should happen
+
+*/
+
+var invDetailMap = {};
+var uniqueSkus = [];
+
+
+for (var i = 0; i < report.originalRows.size(); i++) {
+
+    var reportRow = report.originalRows.get(i);
+
+    utils.log("invDetail: " + reportRow.get("SKU"));
+
+    var invDetail = {
+        sku: reportRow.get("SKU"),
+        expirationDate: reportRow.get("Expiration Date"),
+        zone: reportRow.get("Zone"),
+    };
+
+    if (!invDetail.expirationDate) {
+        utils.log(invDetail.sku + " Skipping, " + invDetail.expirationDate);
+        continue;
+    }
+
+    if (!invDetailMap[invDetail.sku]) {
+        uniqueSkus.push(invDetail.sku);
+        var newArray = [];
+        newArray.push(invDetail)
+        invDetailMap[invDetail.sku] = newArray;
+    } else invDetailMap[invDetail.sku].push(invDetail);
+}
+
+for (var i = 0; i < uniqueSkus.length; i++) {
+    var BMin;
+    var CMin;
+
+    var invDetailList = invDetailMap[uniqueSkus[i]];
+    for (var j = 0; j < invDetailList.length; j++) {
+        //Get Location and find zone from location
+        //If 9B, check to see if min exists, if yes, then see if this is less than that min
+        var invDetail = invDetailList[j];
+        if (invDetail.zone == "9B") {
+            if (!BMin) BMin = invDetail.expirationDate;
+            else if (invDetail.expirationDate < BMin) BMin = invDetail.expirationDate;
+        } else if (invDetail.zone == "9C") {
+            if (!CMin) CMin = invDetail.expirationDate;
+            else if (invDetail.expirationDate < CMin) CMin = invDetail.expirationDate;
+        }
+    }
+
+    if (BMin < CMin) {
+        utils.log("CMin " + CMin + " BMin " + BMin + "YES SWAP: " + uniqueSkus[i]);
+        var BRow = report.createNewRow();
+        BRow.put("SKU", uniqueSkus[i]);
+        BRow.put("Expiration Date", BMin);
+        BRow.put("Zone", "9B");
+        report.addRow(BRow);
+
+        var CRow = report.createNewRow();
+        CRow.put("SKU", uniqueSkus[i]);
+        CRow.put("Expiration Date", CMin);
+        CRow.put("Zone", "9C");
+        report.addRow(CRow);
+    } else {
+        utils.log("CMin " + CMin + " BMin " + BMin + " NO SWAP: " + uniqueSkus[i]);
+
+    }
+}
